@@ -1,0 +1,862 @@
+---
+author: "Butovens Médé"
+date: "2/17/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+### Import necessary libraries
+# install.packages("tidyverse", "dplyr", "skimr", "naniar", "corrplot")
+library(tidyverse)
+library(dplyr)
+library(skimr)
+library(naniar)
+library(corrplot)
+```
+
+
+
+# 1 Anscombe’s Quartet example
+## A)
+```{r}
+
+### A) Read in data set and save to variable
+four_d <- read_csv(file.choose())
+
+### Look at data
+skim(four_d)
+view(four_d)
+```
+
+## B)
+```{r}
+### B) Plotting the 4 scatterplots, one for each dataset
+four_d_plot <- ggplot(data = four_d, 
+                      mapping = aes(x = x, y = y)) +
+  geom_point() +
+  facet_wrap(~dataset)
+
+#### Showing the 4 plots 
+four_d_plot
+```
+
+
+## C)
+```{r}
+### C) Get descriptive statistics for each of the dataset 
+four_d_dscrpt_stats <- four_d %>% 
+  group_by(dataset) %>% 
+  summarize(mean_x = mean(x), 
+            mean_y = mean(y), 
+            sd_x = sd(x), 
+            sd_y = sd(y),
+            cor_x_y = cor(x,y)) %>% 
+  ungroup()
+
+### Showing the descriptive statistics table
+four_d_dscrpt_stats
+```
+
+* Each of the dataset, despite looking very different when plotted, have the same mean, the same standard deviation and the same correlation for their variables x and y. This is an example of the *Anscombe’s Quartet* 
+
+
+## 2 EDA of lexical decision time data and spoken/ written word frequency
+
+```{r}
+#### Download rts data and save it as a dataframe
+rts_data <- read_csv(file.choose())
+
+#### Looking at the data
+skim(rts_data)
+view(rts_data)
+```
+* From the coarse distribution displayed by the skim function we can already see that the RT's might not be normally distributed. 
+
+```{r}
+#### Plotting the distribution of RT's using a histogram
+rt_hist_dexlec <- ggplot(data = rts_data, 
+                         mapping = aes(x = RTlexdec)) +
+  geom_histogram(binwidth = 0.02)
+
+# rt_hist_naming <- ggplot(data = rts_data, 
+#                          mapping = aes(x = RTnaming)) +
+#   geom_histogram(binwidth = 0.02)
+
+### Showing the histogram  
+rt_hist_dexlec 
+```
+
+* No, RT does not appear to be normally distributed. It appears to be bimodal (i.e. two peaks in the distribution).
+
+```{r}
+#### Mean and standard deviation of RTlexdec
+  rts_data %>% 
+  summarize(mean_RTlexdec = mean(RTlexdec), 
+            sd_RTlexdec = sd(RTlexdec))
+
+#### Alternative method
+# mean(rts_data$RTlexdec)
+# sd(rts_data$RTlexdec)
+
+```
+
+* RTlexdec has a mean of 6.55 and a standard deviation of 0.157
+
+```{r}
+#### Mean, se and 95% CI of RT lexdec by LengthInLetters
+rts_data %>% 
+  group_by(LengthInLetters) %>% 
+  summarize(count = n(), 
+            mean_RTlexdec = mean(RTlexdec), 
+            se_RTlexdec = sd(RTlexdec)/sqrt(count),
+            lower_CI = mean_RTlexdec - 1.96 * se_RTlexdec,
+            upper_CI = mean_RTlexdec + 1.96 * se_RTlexdec)%>% 
+  ungroup()
+```
+
+
+```{r}
+### Mean, se and 95% CI (with bootstrap method) of RT lexdec by LengthInLetters 
+
+###Create bootstrap function for confidence intervals
+### Function takes a vector of length l and a probability
+conf_int <- function(vec , prob){
+  #### Initialize empty vector
+  boot_stat <- rep(NA,1000)
+  #### Loop through 1000 values
+  for (i in 1:1000){
+  #### Sample vector multiples times with replacement  
+  resampled_x <- sample(vec, size = length(vec), replace = T )
+  #### Take the mean of the sample created and save it in the empty vector
+  boot_stat[i] <- mean(resampled_x)
+  }
+  #### Take vector with sampled means and a prob, return quantile for that sample 
+  #### and save it to variable CI
+  CI <- quantile(boot_stat, prob)  
+  #### return variable CI
+  return(CI)
+  }
+
+result_tbl <- rts_data %>% 
+  ###Group data by Length in letters
+  group_by(LengthInLetters) %>% 
+  ### Use summarize funtion to summarize variables
+  summarize(count = n(), 
+            ### Compute mean
+            mean_RTlexdec = mean(RTlexdec),
+            ### Compute sd
+            se_RTlexdec = sd(RTlexdec)/sqrt(count),
+            ### Compute lower CI with our created bootstrap function
+            boot_lower_CI = conf_int(RTlexdec, .025),
+            ### Compute upper CI with our created bootstrap function
+            boot_upper_CI = conf_int(RTlexdec, .975),
+            ### Compute lower CI the usual way
+            lower_CI = mean_RTlexdec - 1.96 * se_RTlexdec,
+            ## Compute upper CI the usual way
+            upper_CI = mean_RTlexdec + 1.96 * se_RTlexdec)%>% 
+  ungroup()
+
+### Showing table with boostrapped confidence interval
+result_tbl
+```
+
+*Notes to self: Here despite having the data non-normally distributed, we can compute the confidence interval the usual way by appealing to the central limit theorem. However bootstrapping, is probably necessary for the words that have a sample below 30 (i.e. words with 2 letters and 7 letters in our data)*
+
+```{r}
+#### Bar graph of Mean lexical decision by LenthInLetters
+
+ggplot(data = result_tbl, mapping = aes(x = LengthInLetters, y = mean_RTlexdec)) + 
+  ### Use geom bar
+  geom_bar(stat = "identity", fill = "steelblue") +
+  ### Apply summary stats to data 
+  stat_summary(fun = "mean", geom = "point", size = 1) +
+  ### Zoom in on plot
+  coord_cartesian(ylim = c(6.3,7)) +
+  ### Include error bar with using our computed CI
+  geom_errorbar(aes(ymin = lower_CI, ymax = upper_CI), width = 0.1) 
+```
+
+* It is hard to make a case that words with more letter (i.e. longer length) lead to slower lexical decision (i.e longer reaction time). While the means reaction time appears to increase as words get longer, the confidence intervals of those means encompass the mean values of other the other group means. A case could potentially tried to be made for the difference in reaction time between words of length 3 and words of length 6, or between words of length 5 and 6. The sample size for words of length 2 and 7 are too small to make any meaningful conclusion.
+
+```{r}
+### New data frame with words for which freq. verb and noun greater than zero
+VerbNounFreq <- rts_data %>% 
+  filter(VerbFrequency > 0 & NounFrequency > 0) 
+
+### Number of data points in this new data set
+length(VerbNounFreq$Word)
+
+### Number of data points in the original data set
+length(rts_data$Word)
+
+### Number of date points removed from the original data set
+length(rts_data$Word) - length(VerbNounFreq$Word)
+
+### Mean of new data set
+mean(VerbNounFreq$RTlexdec)
+
+result_tbl_vnf <- VerbNounFreq %>% 
+  group_by(LengthInLetters) %>% 
+  summarize(count = n(), 
+            mean_RTlexdec_vnf = mean(RTlexdec), 
+            se_RTlexdec_vnf = sd(RTlexdec)/sqrt(count),
+            boot_lower_CI_vnf = conf_int(RTlexdec, .025),
+            boot_upper_CI_vnf = conf_int(RTlexdec, .975),
+            lower_CI_vnf = mean_RTlexdec_vnf - 1.96 * se_RTlexdec_vnf,
+            upper_CI_vnf = mean_RTlexdec_vnf + 1.96 * se_RTlexdec_vnf)%>% 
+  ungroup()
+
+### Showing table
+result_tbl_vnf
+
+### Mean differences in RT by word length between complete data frame and smaller one
+result_tbl$mean_RTlexdec - result_tbl_vnf$mean_RTlexdec_vnf
+```
+
+* 4568 points were in the original data set and this eliminates 1854 data points from the original data frame.
+
+* Even while grouping by words length the means RT are unaffected (and so would be the grand mean for RT). That might be because of the law of large numbers. Despite removing more than a third of the observations there is still quite a lot of observations remaining, thus it is possible that the means that we're seeing are very close to the whole population mean.
+
+
+```{r}
+### Relation between WrittenSpokenFrequencyRatio and word length
+
+ggplot(rts_data) +
+  geom_point(aes( x = LengthInLetters, y = WrittenSpokenFrequencyRatio),
+             position = position_jitter(),
+             alpha = 0.5) +
+  geom_hline(aes(yintercept = 1, colour = "red")) 
+ # + geom_violin(aes(x = LengthInLetters, y = WrittenSpokenFrequencyRatio),
+ #              alpha = 0.5) (attempt to add violin plot on top of each letter distribution. Unsuccessful!!)
+```
+
+* Here because written over spoken words is a ratio, a value of 1 would mean that written words are as likely to appear as spoken words. Here there doesn't seem to be any relationship between word length and writtenSpokenFrequency. In other words, the word length doesn't seem to have an impact on the likelihood of a word to be written over being spoken (or vice-versa). There seem to be the same amount of values above and below a ratio of 1 as the word length increases.
+
+```{r}
+### Compute mean RTdeclex for nouns 
+rts_data %>% 
+  filter(WordCategory == "N") %>% 
+  summarize(count_n = n(),
+            mean_RT_lexdec_n = mean(RTlexdec))
+
+### Compute mean RTdeclex for verbs
+rts_data %>% 
+  filter(WordCategory == "V") %>% 
+  summarize(count_v = n(),
+            mean_RT_lexdec_v = mean(RTlexdec))
+
+```
+* Verbs have lower mean RTlexdec with a mean of 6.54 (as opposed to 6.55 for nouns)
+
+```{r}
+### Ratio log A/B of NounFrequency and VerbFrequency
+rts_data_NV_ratio <- rts_data %>% 
+  mutate(NounVerbFreqRatio = log(NounFrequency / VerbFrequency))
+
+### replace non value by NA (Here the function replace_with_na from the naniar package was used)rts
+rts_data_NV_ratio_na <- rts_data_NV_ratio %>% 
+  replace_with_na(replace = list(NounVerbFreqRatio = Inf))
+
+### number of NA produced
+rts_data_NV_ratio_na %>% 
+  select(NounVerbFreqRatio) %>% 
+  is.na %>% 
+  sum()
+```
+
+* There are 1494 NA produced.
+
+```{r}
+### Correlation plot between 
+rts_cor <- rts_data_NV_ratio_na %>% 
+  select(Familiarity, 
+         WrittenFrequency, 
+         FamilySize, 
+         NounVerbFreqRatio, 
+         RTlexdec) %>% 
+  cor() %>% 
+  round(2)
+
+### Result
+rts_cor 
+
+### Plot of correlation
+
+rts_data_NV_ratio_na %>% 
+  select(Familiarity, 
+         WrittenFrequency, 
+         FamilySize, 
+         NounVerbFreqRatio, 
+         RTlexdec) %>% 
+  pairs()
+```
+  
+* None of the factors are positively correlated with reaction time  
+  
+```{r}
+  
+### Alternative method to visualize correlation
+corrplot(rts_cor, 
+         method = "color",
+         type = "lower",
+         tl.col = "black",
+         tl.srt = 45,
+         addCoef.col = "black") 
+  
+```
+
+```{r}
+### histogram for young and old subjects
+ggplot(data = rts_data_NV_ratio_na, mapping = aes(x = RTlexdec)) +
+  geom_histogram(binwidth = 0.02) +
+  facet_wrap(~AgeSubject )
+```
+
+* This reveals that the first histogram was combination of these two histograms. There were actually two distinct populations with different means (and maybe different variance) in the histogram. 
+
+* It appears that the young person data look normally distributed.
+
+```{r}
+### computing mean RT and sd RT for old and young 
+MeanSdRTOldYoung <- rts_data %>%
+  group_by(AgeSubject) %>% 
+  summarize(count = n(), mean = mean(RTlexdec), sd = sd(RTlexdec)) %>% 
+  ungroup()
+
+### Adding z-score columns to the original data set
+rts_data_Z <- rts_data %>% 
+  mutate(Z_Old = (RTlexdec - MeanSdRTOldYoung$mean[1]) / MeanSdRTOldYoung$sd[1],
+         Z_Young =  (RTlexdec - MeanSdRTOldYoung$mean[2]) / MeanSdRTOldYoung$sd[2])
+
+### Alternative coding using "which" (more difficult to read) #############################################################
+rts_data %>% 
+  mutate(Z_Old = (RTlexdec - mean(rts_data$RTlexdec[which(rts_data$AgeSubject == "old")]))/ sd(rts_data$RTlexdec[which(rts_data$AgeSubject == "old")]),
+         Z_Young =  (RTlexdec - mean(rts_data$RTlexdec[which(rts_data$AgeSubject == "young")]))/ sd(rts_data$RTlexdec[which(rts_data$AgeSubject == "young")]))
+#############################################################################################################
+
+### results
+rts_data_Z %>% 
+  select(Z_Old, Z_Young)
+
+### Z scores for words GULP and DOE
+rts_data_Z %>% 
+  filter(Word == "gulp" | Word == "doe") %>% 
+  select(Word, Z_Old, Z_Young) 
+
+### Average Z-score for each word by AgeSubject
+rts_data_Z %>% 
+  filter(Word == "gulp" | Word == "doe") %>% 
+  select(Word, Z_Old, Z_Young) %>% 
+  group_by(Word) %>% 
+  summarize(mean_Z_old = mean(Z_Old), mean_Z_Young = mean(Z_Young)) %>% 
+  ungroup()
+```
+* The Z_scores for the word "doe": -1.01 and 0.03 respectively, for each time they were presented and compared to the mean RT for old people, and they were 0.98 and 2.12 respectively, for each time they were presented and compared to the mean RT for young people. 
+
+* Similarly, the Z_scores for the word "gulp" were: -1.92, -0.22 respectively, for each time they were presented and compared to the mean RT for old people, and they were 0.00 and 1.84 respectively, for each time they were presented and compared to the mean RT for young people.
+
+* Overall it seems that the RTs for the words "doe" and "gulp" are below the average RT of the population when compared to the mean RT of old people, but the RTs for the same words are above the average RT of the population when compared to the mean RT of young people. 
+
+```{r}
+### Words with biggest z-score difference and Old biggest relative to Young
+rts_data_Z %>% 
+  mutate(diff_Z = Z_Old - Z_Young) %>% 
+  select(Word,Z_Old, Z_Young, diff_Z) %>% 
+  arrange(diff_Z) %>%
+  filter(abs(Z_Old) < abs(Z_Young))
+```
+
+* The 3 words with the biggest difference between young z-score and old z-score and for which **young** is the **biggest** relative to old are: "pyre", "moll" and "font". Here, this means that for these 3 words there is the biggest difference in reaction time between young and old people when they are campared to the population mean RT. Also for these words, young people z-scores are the biggest relative to old people, meaning that they are slower to recognize those as real words. 
+
+```{r}
+### Words with biggest z-score difference and Old biggest relative to Young
+rts_data_Z %>% 
+  mutate(diff_Z = Z_Old - Z_Young) %>% 
+  select(Word,Z_Old, Z_Young, diff_Z) %>% 
+  arrange(diff_Z) %>%
+  filter(abs(Z_Old) > abs(Z_Young))
+```
+
+* Inversely, the 3 words with the biggest difference between young z-score and old z-score and for which **old** is the **biggest** relative to young are: "found", "beer" and "bend". For these words, old people z-scores are the biggest relative to young people. Here because the z-scores for old people is negative and the ones for young is positive, it means that old people are faster (than average) to recognize those as real words.
+
+* For these words pyre, moll, font because the difference is z-score is relatively big, it might mean that there is a generational gap in the learning or the use of these words between old and young. Those words are not as much used as before. That generational gap seems to decrease with words such as found, beer and bend as seen in the lesser difference in z-score between old and young for these words.
+
+```{r}
+### Create data set with young subject data
+rts_data_Young <- rts_data %>%
+  filter(AgeSubject == "young")
+
+### Compute Z-score for Young data set
+rts_data_Young_Z <- rts_data_Young %>%
+  mutate(Z_score = (RTlexdec - mean(RTlexdec)) / sd(RTlexdec) ) 
+
+### Result
+rts_data_Young_Z %>% select(Z_score)
+```
+
+* If the data were normally distributed I would expect **2.5%** of the data to have a **greater** z-score than **1.96** and also **2.5%** to have a **lesser** z-score than **-1.96**
+
+```{r}
+### percentage of the data that has a score above 1.96
+rts_data_Young_Z %>%
+  filter(Z_score > 1.96) %>%
+  summarize(count = n(), percent = count/length(rts_data_Young_Z$Z_score))
+```
+
+* For this data set the percentage of z-scores that is above 1.96 is 3.8, which is bigger than the 2.5% expected if the distribution was normal.
+
+```{r}
+### percentage of the data that has a score below -1.96
+rts_data_Young_Z %>%
+  filter(Z_score < -1.96) %>%
+  summarize(count = n(), percent = count/length(rts_data_Young_Z$Z_score))
+```
+
+* For this data set the percentage of z-scores that is below -1.96 is 0.3%, which is a lot less than the 2.5% expected if the distribution was normal.
+
+* The difference might suggest that the data is not normally distributed or symmetrical.
+
+* If the data were normally distributed we would have about 0.1% a z-score higher than 3.
+
+```{r}
+### Words with z-scores higher than 3
+rts_data_Young_Z %>% 
+  filter(Z_score > 3) %>% 
+  select(Word, Z_score)
+```
+ * These words do not look like real words (aside from yang maybe used in ying-yang), thus people might take longer than average to recognize that it is a word. 
+ 
+```{r}
+### Plot of the data
+ggplot(data = rts_data_Young_Z,
+       mapping = aes(x = RTlexdec)) +
+  geom_histogram(binwidth = 0.015)
+```
+ 
+ * After plotting the data it appears that it is slightly right skewed.
+ 
+```{r}
+### Computing mean RT for words that start with p vs all others
+rts_data_Young_Z %>% 
+  ### Add column start with p. If p detected in column word, add yes, otherwise add no
+  mutate(start_with_p = if_else(str_detect(Word, pattern = "^p"), "yes", "no")) %>% 
+  ### Group by star with p column
+  group_by(start_with_p) %>% 
+  ### Compute summary stats
+  summarize(count = n(), mean = mean(RTlexdec), sd = sd(RTlexdec)) %>% 
+  ungroup()
+```
+ * The mean RT for words that start with p is 6.43 and the mean for words that do not start with p is 6.44.
+
+```{r}
+### Creating sub data needed to run comparison
+
+#### RT for words starting with p
+rts_p <- rts_data_Young_Z %>% 
+  ### Filter by words that start with p
+ filter(str_detect(Word, pattern = "^p")) %>% 
+  select(RTlexdec)
+
+#### RT for words NOT starting with p
+rts_no_p <- rts_data_Young_Z %>% 
+  ### FIlter by words that do NOT start with p
+ filter(str_detect(Word, pattern = "^p", negate = T)) %>%
+  select(RTlexdec)
+
+#### T-test comparing both groups
+t.test(rts_p, rts_no_p, alternative = "two.sided", conf.level = 0.95, var.equal = F, paired = F)
+
+
+### Alternative coding : Comparing mean RT for words that start with p vs all others ##############
+rts_data_Young_P <- rts_data_Young_Z %>% 
+  mutate(start_with_p = if_else(str_detect(Word, pattern = "^p"), "yes", "no"))
+
+### t-test
+t.test(rts_data_Young_P$RTlexdec[which(rts_data_Young_P$start_with_p == "yes")],
+       rts_data_Young_P$RTlexdec[which(rts_data_Young_P$start_with_p == "no")])
+###################################################################################################
+```
+
+* The t-value for this t-test -1.48 with a p-value of 0.14 (i.e. t(218.81), p =0.14) The p-value is not significant. Based on this we can conclude that there is no meaningful difference in reaction time for word recognition when those words start with "p" versus when they do not start with "p".
+
+```{r}
+### barplot for mean noun RT vs mean verb RT
+ggplot(data = rts_data_Young_Z, mapping = aes(x = WordCategory, y = RTlexdec)) +
+  stat_summary(fun = "mean", geom = "col", fill = "steelblue", color = "black") +
+  stat_summary(fun = "mean", geom = "point", size = 1) +
+  stat_summary(fun.data = "mean_cl_boot", geom = "errorbar", width = .1, fun.args = list(conf.int = .95, B = 2000)) +
+  coord_cartesian(ylim = c(6.3,6.6)) 
+  
+```
+
+```{r}
+### Boxplot for words grouped by their initial letter
+rts_data_Young_Z %>% 
+  mutate(init_letter = str_sub(Word, 1, 1)) %>% 
+  ggplot(mapping = aes(x = init_letter, y = RTlexdec)) + geom_boxplot() +
+  geom_jitter(alpha = 0.2, color = "tomato")
+```
+
+```{r}
+### RT for words starting with two consonants
+rts_2_cons <- rts_data_Young_Z %>% 
+  ### Filter by words that starts with two consecutive vowels
+  filter(str_detect(Word, pattern = "[^aeiou][^aeiou]")) %>% 
+  select(RTlexdec)
+
+### RT for words NOT starting with two consonants
+rts_no_2_cons <- rts_data_Young_Z %>% 
+  ### Filter by words that do NOT start by two consecutive vowels (i.e. consonant-vowels or vowels consonants)
+  filter(str_detect(Word, pattern = "[^aeiou][^aeiou]", negate = T)) %>% 
+  select(RTlexdec)
+
+### T-test comparing RT for words that starts with 2 consonants to RTs of all other words
+t.test(rts_2_cons, rts_no_2_cons, alternative = "two.sided", conf.level = 0.95, var.equal = F, paired = F)
+
+
+### Alternative coding : Comparing mean RT for words that start with p vs all others ##############
+rts_data_Young_2_cons <- rts_data_Young_Z %>% 
+  mutate(start_with_2_cons = if_else(str_detect(Word, pattern = "[^aeiou][^aeiou]"), "yes", "no"))
+
+### t-test
+t.test(rts_data_Young_2_cons$RTlexdec[which(rts_data_Young_2_cons$start_with_2_cons == "yes")],
+       rts_data_Young_2_cons$RTlexdec[which(rts_data_Young_2_cons$start_with_2_cons == "no")])
+###################################################################################################
+```
+
+* The t-value for this t-test 4.264 with a p-value of 2.14e-05 (i.e. t(1468.9), p = 2.14e-05). The p-value is significant. Based on this we can conclude that there is a significant difference in reaction time for word recognition when those words start with 2 consonants as opposed to when they start with two vowels or a consonant and a vowel (or vice versa). Here people are slower to recognize a word as being a real word when it starts with 2 consonants versus when it does not.
+
+# 3 Multiplicity testing problem: simulation
+## A)
+```{r}
+#### Simulation set up
+
+#### reproducibility
+set.seed(210)
+
+#### Number of simulations
+n_sim <- 1000
+
+### Alpha value
+alpha_val <- 0.05
+
+### Number of t-tests
+num_ttest <- 1:20
+#### Simulation 
+
+### replicate 20 simulation of the following expression
+sim_data <- replicate(n = 20, 
+                      ### replicate n_sim of the following expression
+                      expr = (replicate(n_sim, 
+                                        ### do t-tests on 2 populations where 30 participants are
+                                        ### drawn randomly from a normal distribution.
+                                        ### One population has mean 110 and sd 15 and the other one has
+                                        ### mean 105 and sd 15
+                                        t.test(rnorm(30,110,15),
+                                               rnorm(30,110,15), 
+                                                      var.equal = T)$p.value, 
+                                        ### simplify TRUE saves vectors into an array and not a list
+                                        simplify = T) < alpha_val), 
+                      simplify = T)
+
+
+#### Probability of at least one significant p-value
+
+### Intializing empty vector
+p_at_least_one <- rep(NA,length(num_ttest))
+
+### Looping through number of t-tests
+
+####################################################################################
+# The following code look at a row of the simulation data frame, check if the
+# condition (i.e. values in row < alpha values) is satisfied in the row, then check 
+# a new condition (does any values satisfies [values in row < alpha values]), and returns
+# a boolean. Using the function "sapply" this process is vectorized/applied to all the rows in the
+# simulation data frame. Then the boolean are summed and divided by the number of rows (i.e averaged)
+# The loop increases the numbers of columns whose rows are taken into account.
+####################################################################################
+for (i in num_ttest){
+  ### Saving values at each iteration
+  p_at_least_one[i] <- sum(sapply(1:n_sim, 
+                                  function(x)any(sim_data[x,1:i] == T))) /n_sim
+  ### Create data frame 
+  multi_df <- data.frame(p_at_least_one, num_ttest)
+  }
+  
+### Plot multiplicity test
+ ggplot(data = multi_df) +
+    #### Define aesthetic and variables to use for the plot 
+      geom_point(aes(x = num_ttest, y = p_at_least_one)) +
+   #### Define labels for the plot
+       labs(title = "Multiplicity problem with repeated t-tests on same data",
+        x = "Number of t-tests",
+        y = "Probability of type I error") + 
+   #### Add line of best fit, with variables and method to use
+      geom_smooth(aes(x = num_ttest, y = p_at_least_one), method = "loess") +
+   #### Change default theme
+    theme_bw() +
+   #### Change text size
+    theme(text=element_text(size = 12))
+
+########## (Alternative) Probability of at least one significant p-value (using muliplicity formula) ######
+num_ttest <- 1:20
+ #### Create function that takes a alpha value and a vector of t-test number
+  multiplicity <- function(alpha,num_ttest) { 
+    #### Initialize an empty vector that has length
+    multi <- rep(NA,length(num_ttest))
+    #### Loop through the vector of t-tests
+    for (i in num_ttest) {
+      #### Apply the multiplicity formula and save results in empty vector
+      multi[i] <-1-(1-alpha)^num_ttest[i] 
+    }
+    #### Create data frame
+    df = data.frame(num_ttest, multi)
+    #### Use data frame to plot
+    ggplot(data = df) +
+      #### Define aesthetic and variables to use for the plot 
+      geom_point(aes(x = num_ttest, y = multi)) +
+      #### Define labels for the plot
+       labs(title = "Multiplicity problem with repeated t-tests on same data",
+        x = "Number of t-tests",
+        y = "Probability of type I error") + 
+      #### Add line of best fit, with variables and method to use
+      geom_smooth(aes(x = num_ttest, y = multi), method = "loess") +
+      #### Change default theme
+    theme_bw() +
+      #### Change text size
+    theme(text=element_text(size = 12))}
+
+  
+### Plot multiplicity simulation
+multiplicity(0.05, num_ttest)
+```
+
+## B)
+
+* We can see that when we increase the number of t-tests done on the same data, we also increase the type I error rate. In our example, the researchers have 5 different outcome variables (i.e.response time, accuracy, time spent on response, IQ and working memory), thus they would do ${5 \choose 2}{= \frac{5!}{2!(5-2)!}} = 10$, 10 t-tests. We can see that by doing 10 repeated t-tests on the same data we have a probability of finding at least one significant p-value (type I error) of 40%. Thus, when we design experiments and we know that we're going to be looking at mean difference then we should only focus on 1 dependent variable a a time. If we're collecting multiple dependent variables then we need to adapt our analysis by correcting for the increase of type I error (e.g. Bonferroni), or by doing an appropriate multivariate analysis.
+
+```{r}
+#### Bonferroni correction applied to simulation:
+multiplicity_corrected <- function(alpha,num_ttest) { 
+    multi <- rep(NA,length(num_ttest))
+    for (i in num_ttest) {
+      ### Apply the multiplicity formula with p-value corrected and save results in empty vector
+      multi[i] <-1-(1-(alpha/i))^num_ttest[i] 
+    }
+    df = data.frame(num_ttest, multi)
+    ggplot(data = df) +
+      geom_point(aes(x = num_ttest, y = multi)) +
+       labs(title = "Multiplicity problem with repeated t-tests on same data \
+       corrected with Bonferroni",
+        x = "Number of t-tests",
+        y = "Probability of type I error") + 
+      geom_smooth(aes(x = num_ttest, y = multi), method = "loess") +
+    theme_bw() +
+    theme(text=element_text(size = 12))}
+
+#### Plot Corrected multiplicity simulation  
+multiplicity_corrected(0.05, num_ttest)
+
+```
+* We can see that applying Bonferroni correction when doing multiple t-tests on the same data, helps keep type I error to a value that is below 0.05.
+
+*Note: Some studies have shown that Bonferroni correction has it's limit as well. It is very conservative, thus the higher the number of t-tests (and corrections) done, the more stringent the family-wise error rate (i.e. the probability of making one or more type I errors when performing multiple hypotheses tests) becomes. In addition it substantially reduces statistical power of rejecting an incorrect null hypotheses in each test.*
+
+# 4 Bayesian thinking of dog bias in the Merced population:
+
+## A)
+
+* In this study, in which participants had to choose between the picture of a dog or of a cat, 67 participants picked a dog out of 100. Given that participants had to make a binary choice, and the task was repeated several times, a binomial distribution seems to be the most appropriate one to model the behavior (and the data), and do a Bayesian analysis. For this Bayesian analysis the likelihood would be the probability of getting 67-dog pictures chosen (of of a 100) given a certain amount of dog-bias in the Merced population. Thus we would have: $p(k= 67 |n=100, \theta) = {100 \choose 67} p^{67} (1-p)^{100-67}$ \
+A commonly used conjugate of the binomial distribution is the Beta distribution. We will use this distribution to model our prior beliefs about the level of dog-bias in the Merced population. As we couldn't find any precise statistics on the number of dog and cat licenses owned by Mercedians which would have given us some indications about the preference in terms of pet ownership (and by extention, pet-bias in Merced), we would use this grim piece of information dating back 4 years ago: [Number of euthanasia in animal shelters in Merced](https://www.co.merced.ca.us/DocumentCenter/View/17721/FY-2016-17-Animal-Euthanasia-Stats?bidId=). Based on this information it seems that dogs and cats are getting euthanized in similar numbers. We're going to make the assumption that there are as many dogs as there are cats in Merced. Thus, combining the previous information with this assumption, we can further assume that there doesn't seem to be any preferences for one type of pet or another in Mercedians. \
+While we could choose a Beta distribution with shape parameters, $\alpha = 1$ and $\beta=1$, which would look like a uniform distribution (and which would represent a total lack of knowledge about the dog-bias state of Mercedians), we are gonig to choose intead a Beta distribution with shape parameters $\alpha = 4$ and $\beta=4$. This shows that we have some reason to weakly believe that there's equal probability in Mercedians being dog-biased and cat-biased. Also the choice of weakly informative prior is motivated by the fact that some simulation studies have shown that in some cases weakly informative priors (even misspecified ones) do better than non-informative (or diffuse) priors at recovering the underlying true paramaters of a population. In some cases a fully non-informative priors (e.g. uniform) can adversely impact the proper estimation of the posterior distribution. 
+
+
+##### Computing the prior (the long way for personal notes):
+
+The posterior of the distribution is computing using Bayes formula:
+$$
+P(\theta|D) = \frac{Pr(D|\theta)\times Pr(\theta)}{Pr(D)}  
+$$
+
+By replacing by the proper Likelihood and prior we get:
+$$
+P(\theta|n=100,k=67) = \frac{{100 \choose 67} \theta^{67} (1-\theta)^{33}\times \frac{\theta^{3}(1-\theta)^{3}}{B(4,4)}} {\int_0^1 p(k=67|n=100)p(\theta)d\theta}  
+$$
+
+By rearranging we get:
+
+$$
+P(\theta|n=100,k=67) = \frac{{100 \choose 67}\frac{1}{B(4,4)}} {\int_0^1 p(k=67|n=100)p(\theta)d\theta}\ \theta^{67} (1-\theta)^{33} \times \theta^{3}(1-\theta)^{3}
+$$
+
+Without the normalizing constant Bayes formula can be rewritten:
+$$
+P(\theta|D) \propto Pr(D|\theta)\times Pr(\theta) 
+$$
+
+Thus by removing the constant term from the previous equation we get:
+$$
+P(\theta|n=100,k=67) \propto \theta^{67} (1-\theta)^{33} \times \theta^{3}(1-\theta)^{3}
+$$
+
+And we can merge the like terms:
+$$
+P(\theta|n=100,k=67) \propto \theta^{67+3} (1-\theta)^{33+3} = \theta^{70} (1-\theta)^{36}
+$$
+Then because $Beta(a,b): p(\theta|a,b) = \frac{\theta^{a-1}(1-\theta)^{b-1}}{B(a,b)}$ \
+We have: $\theta^{70}(1-\theta)^{36} = \theta^{71-1}(1-\theta)^{37-1}$ \
+
+We computed a posterior for $\theta$ which as a distribution $B(71,37)$ \
+
+Thus we finally have:
+
+$$
+P(\theta|n=100,k=67) = \frac{\theta^{71-1}(1-\theta)^{37-1}}{B(71,37)}
+$$
+##### Computing the posterior (the short way using the beta-binomial conjugacy):
+
+* We have a **likelihood**: $Binomial(n,k|\theta) \propto \theta^{k} (1-\theta)^{n-k}$ \
+* And a **prior**: $Beta(a,b) \propto \theta^{a-1}(1-\theta)^{b-1}$, \
+* Thus their product would be: $\theta^{k} (1-\theta)^{n-k}\ \theta^{a-1}(1-\theta)^{b-1} = \theta^{a+k-1}(1-\theta)^{b+n-k-1}$ \
+* The **posterior** is $Beta(a+k, b+n-k)$ \
+
+* By computing the with the numbers we got:
+* **likelihood**: $Binomial(100,67|\theta)$ with $n=100$ and $k=67$ \
+* **prior**: $Beta(4,4)$ with $a =b = 4$\
+* **posterior**  $Beta(4+67, 4+100-67) = Beta(71,37)$ 
+
+## B)
+```{r}
+### Plotting all the distributions
+theta <- seq(from = 0, to = 1, by = 0.01)
+Likelihood <- dbinom(67, 100, prob = theta)
+Prior <- dbeta(theta, shape1 = 4, shape2 = 4)
+Posterior <- dbeta(theta, shape1 = 71, shape2 = 37)
+
+Beta_dat <- data.frame(theta, Likelihood, Prior, Posterior) %>% 
+  pivot_longer(cols = !theta, names_to = "Distributions", values_to = "Density")
+
+ggplot(Beta_dat) +
+  geom_line(aes(x = theta, y = Density, color = Distributions), size =1) +
+  labs(title = "Prior, Likelihood and Posterior distributions of dog-bias in Mercedians",
+        x = "Theta",
+        y = "Density") +
+    theme_bw() +
+    theme(text=element_text(size = 12)) 
+```
+
+##### Computing the mean of the beta posterior:
+
+We have: $p(\theta|n,k) \sim Beta(71,37)$, and the expected value for the Beta distribution is $E[X] = \frac{a}{a+b}= \frac{71}{71+37}= 0.6574074 $ \
+
+##### Computing the variance of the beta posterior:
+The variance is: $var[X] = \frac{a.b}{(a+b)^2(a+b+1)} = \frac{71\times37}{(71+37)^2(71+37+1)}=0.002066265$
+
+##### Computing the credible interval of the beta posterior:
+```{r}
+qbeta(c(0.025,0.975),70+1,36+1) %>%  round(2)
+```
+
+Thus, we have 95%$HDI[0.57,0.74]$.
+
+Given our beta prior with shape a = b = 4, and our binomial likelihood with n = 100 and k = 67, we can say we are 95% confident that the true value of the dog-bias for Mercedians is between .57 and .74. Thus it seems that Mercedians have a bit of a bias in favor of dogs.
+
+```{r}
+### Plotting the posterior distribution with credible interval
+
+ggplot() +
+  geom_line(aes(x = theta, y = Posterior), color = "brown3", size = 1) +
+  geom_segment(aes(x = 0.57 , y = 0, xend = 0.74, yend = 0)) +
+  labs(title = "Posterior distribution of dog-bias in Mercedians (including 95% HDI)",
+        x = "Theta",
+        y = "Density") +
+    theme_bw() +
+    theme(text=element_text(size = 10)) 
+  
+```
+
+
+##### Sensitivity analysis:
+
+* Let's see if the choice of our prior has had any impact on the posterior that we found by doing a sensitivity analysis.
+
+* We will try a diffuse prior $Beta(1,1)$, an informative prior $Beta(16,16)$ and a weakly informative prior that favors cat-bias $Beta(4,10)$. WIth the same data
+```{r}
+#### Building different prior with Beta distribution
+prior_diff <- dbeta(theta, shape1 = 1, shape2 = 1)
+prior_info <- dbeta(theta, shape1 = 16, shape2 = 16)
+prior_weak <- dbeta(theta, shape1 = 4, shape2 = 10)
+
+#### Building data frame with Prior vectors
+prior_dat <- data.frame(theta, Likelihood, prior_diff, prior_info, prior_weak) %>%  
+  pivot_longer(cols = !c(theta,Likelihood), names_to = "Prior_type", values_to = "Density")
+
+#### Plotting the different type of priors
+ggplot(prior_dat, aes(x = theta, y = Density, color = Prior_type)) + geom_line(size = 1)  +
+  labs(title = "Prior distributions for sensitivity analysis",
+        x = "Theta",
+        y = "Density") +
+    theme_bw() +
+    theme(text=element_text(size = 10)) 
+  
+```
+
+##### Computing the different posteriors with the different priors
+
+* For the diffuse prior $Beta(1,1)$ we have a posterior: $Beta(1+67, 1+100-67) = Beta(68,34)$
+
+* For the informative prior $Beta(16,16)$ we have a posterior: $Beta(16+67, 16+100-67) = Beta(83,49)$
+
+* For the weakly informative cat-bias prior $Beta(4,10)$ we have a posterior: $Beta(4+67, 10+100-67) = Beta(71,43)$
+
+
+```{r}
+#### Plotting the posteriors for the sensitivity analysis
+post_diff <- dbeta(theta, shape1 = 68, shape2 = 34)
+post_info <- dbeta(theta, shape1 = 83, shape2 = 49)
+post_weak <- dbeta(theta, shape1 = 71, shape2 = 43)
+
+#### Building data frame with Prior vectors
+post_dat <- data.frame(theta, Likelihood, post_diff, post_info, post_weak) %>%  
+  pivot_longer(cols = !c(theta,Likelihood), names_to = "Prior_type", values_to = "Density")
+
+#### Plotting the different type of priors
+ggplot(post_dat, aes(x = theta, y = Density, color = Prior_type)) + geom_line(size = 1)  +
+  labs(title = "Posterior distributions after sensitivity analysis",
+        x = "Theta",
+        y = "Density") +
+    theme_bw() +
+    theme(text=element_text(size = 10)) +
+  geom_line(aes())
+
+```
+
+* The expected values for the posterior with diffuse prior is $E[X] = \frac{a}{a+b}= \frac{68}{68+34}= 0.6666667$, with variance:  $var[X] = \frac{a.b}{(a+b)^2(a+b+1)} = \frac{68\times34}{(68+34)^2(68+34+1)}=0.002157497$: \
+
+```{r}
+qbeta(c(0.025,0.975),67+1,33+1) %>%  round(2)
+```
+ and 95%$HDI[0.57,0.75]$. \
+
+
+* The expected values for the posterior with informative prior is $E[X] = \frac{a}{a+b}= \frac{83}{83+49}= 0.6287879$, with variance:  $var[X] = \frac{a.b}{(a+b)^2(a+b+1)} = \frac{83\times49}{(83+49)^2(83+49+1)}=0.00175499$: \
+
+```{r}
+qbeta(c(0.025,0.975),82+1,48+1) %>%  round(2)
+```
+
+and 95%$HDI[0.54,0.71]$. \
+
+* The expected values for the posterior with weakly informative cat-bias prior is $E[X] = \frac{a}{a+b}= \frac{71}{71+43}= 0.6287879$, with variance: $var[X] = \frac{a.b}{(a+b)^2(a+b+1)} = \frac{71\times43}{(71+43)^2(71+43+1)}=0.002042769$ \
+
+```{r}
+qbeta(c(0.025,0.975),70+1,42+1) %>%  round(2)
+```
+
+and 95%$HDI[0.53,0.71]$.
+
+* Thus the sensitivity analysis revealed that our posterior was robust to the choice of the prior. We can therefore be more confident in our posterior and the fact that there may be a slight dog-bias in Mercedians.
+
+
