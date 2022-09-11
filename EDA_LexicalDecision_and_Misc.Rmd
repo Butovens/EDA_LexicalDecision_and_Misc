@@ -1,4 +1,5 @@
 ---
+title: "EDA of lexical decision + miscellaneous"
 author: "Butovens Médé"
 date: "2/17/2021"
 output: html_document
